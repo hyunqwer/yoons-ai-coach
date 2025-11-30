@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Mic, Play, SkipForward, Square, Home } from 'lucide-react';
+import { Mic, Play, SkipForward, Square, Home, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -30,16 +30,12 @@ export default function PracticePage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // 1. 초기 로드: 로컬 스토리지에서 데이터 가져오기
   useEffect(() => {
     const rawData = localStorage.getItem('practiceData');
     if (!rawData) {
-      alert('학습 데이터가 없습니다. 메인으로 이동합니다.');
       router.push('/');
       return;
     }
-
-    // 텍스트 파싱
     const lines = rawData.split('\n').filter(line => line.trim() !== '');
     const parsedSentences = lines.map((line, index) => {
       const parts = line.split('|');
@@ -48,20 +44,12 @@ export default function PracticePage() {
         englishText: parts[0].trim(),
         koreanText: parts.length > 1 ? parts[1].trim() : '',
       };
-    }).filter(s => s.englishText !== ''); // 빈 영어 문장 제외
-
-    if (parsedSentences.length === 0) {
-      alert('유효한 영어 문장이 없습니다.');
-      router.push('/');
-      return;
-    }
-
+    }).filter(s => s.englishText !== '');
     setSentences(parsedSentences);
   }, [router]);
 
   const currentSentence = sentences[currentIndex];
 
-  // 2. TTS 재생
   const playTTS = async () => {
     if (!currentSentence) return;
     try {
@@ -72,12 +60,9 @@ export default function PracticePage() {
       const blob = await res.blob();
       const audio = new Audio(URL.createObjectURL(blob));
       audio.play();
-    } catch (e) {
-      console.error(e);
-    }
+    } catch (e) { console.error(e); }
   };
 
-  // 3. 녹음 시작
   const startRecording = async () => {
     setFeedback(null);
     setUserText('');
@@ -86,14 +71,11 @@ export default function PracticePage() {
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
-
       mediaRecorder.ondataavailable = (e) => audioChunksRef.current.push(e.data);
       mediaRecorder.onstop = submitAudio;
       mediaRecorder.start();
       setIsRecording(true);
-    } catch (err) {
-      alert('마이크 사용 권한이 필요합니다.');
-    }
+    } catch (err) { alert('마이크 권한 필요'); }
   };
 
   const stopRecording = () => {
@@ -101,33 +83,19 @@ export default function PracticePage() {
     setIsRecording(false);
   };
 
-  // 4. 오디오 제출 및 피드백 요청 (기존 API 활용)
   const submitAudio = async () => {
     setIsProcessing(true);
     const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
     const formData = new FormData();
     formData.append('audio', audioBlob, 'recording.webm');
-    // API 호환성을 위해 임시 ID 전송 (DB 조회 로직 수정 필요하지만, 
-    // 일단 API 쪽에서 DB 조회를 건너뛰거나, text를 직접 보내는 방식으로 수정해야 함.
-    // 여기서는 MVP를 위해 프론트에서 정답 문장을 같이 보내도록 API를 약간 수정하거나,
-    // 기존 API가 DB ID를 필수라 하면 에러가 날 수 있음. 
-    // -> **해결책: API도 수정해야 합니다.** (아래 3번 항목 참조)
     formData.append('targetText', currentSentence.englishText); 
 
     try {
-      // API 경로를 약간 수정하거나 새로 만듭니다. 여기서는 기존 경로 대신 'direct-eval' 사용 권장
-      const res = await fetch('/api/speaking/direct-evaluate', { 
-        method: 'POST',
-        body: formData,
-      });
-      
+      const res = await fetch('/api/speaking/direct-evaluate', { method: 'POST', body: formData });
       const data = await res.json();
       setUserText(data.recognized_text);
       setFeedback(data.feedback);
-    } catch (e) {
-      console.error(e);
-      alert('오류가 발생했습니다.');
-    }
+    } catch (e) { alert('오류 발생'); }
     setIsProcessing(false);
   };
 
@@ -137,129 +105,146 @@ export default function PracticePage() {
     if (currentIndex < sentences.length - 1) {
       setCurrentIndex(prev => prev + 1);
     } else {
-      if(confirm('모든 문장을 완료했습니다! 처음으로 돌아갈까요?')) {
-        router.push('/');
-      }
+      if(confirm('학습 완료! 홈으로 갈까요?')) router.push('/');
     }
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-green-600';
-    if (score >= 50) return 'text-yellow-600';
-    return 'text-red-600';
+  const ScoreBadge = ({ label, score }: { label: string, score: number }) => {
+    let color = 'bg-red-100 text-red-600';
+    if (score >= 80) color = 'bg-emerald-100 text-emerald-600';
+    else if (score >= 50) color = 'bg-amber-100 text-amber-600';
+
+    return (
+      <div className="flex flex-col items-center p-3 rounded-2xl bg-slate-50 border border-slate-100 w-full">
+        <span className="text-xs text-slate-400 font-medium mb-1">{label}</span>
+        <span className={`text-xl font-black ${color.split(' ')[1]}`}>{score}</span>
+      </div>
+    );
   };
 
-  if (!currentSentence) return <div className="flex justify-center items-center h-screen">로딩 중...</div>;
+  if (!currentSentence) return <div className="flex items-center justify-center h-screen text-slate-400">Loading...</div>;
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* 상단 네비게이션 */}
-      <div className="bg-white shadow-sm p-4 flex justify-between items-center">
-        <Link href="/" className="text-slate-500 hover:text-blue-600 transition-colors">
-          <Home size={24} />
-        </Link>
-        <div className="font-bold text-slate-700">
-           {currentIndex + 1} / {sentences.length}
+    <div className="min-h-[calc(100vh-64px)] bg-slate-50 flex flex-col items-center p-4">
+      {/* 상단 진행 바 */}
+      <div className="w-full max-w-2xl mb-6 flex items-center justify-between px-2">
+        <Link href="/" className="p-2 text-slate-400 hover:text-indigo-600 transition-colors"><Home size={20} /></Link>
+        <div className="flex-1 mx-4 h-2 bg-slate-200 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-500 ease-out"
+            style={{ width: `${((currentIndex + 1) / sentences.length) * 100}%` }}
+          />
         </div>
-        <div className="w-6"></div> {/* 밸런스용 빈공간 */}
+        <span className="text-xs font-bold text-slate-500">{currentIndex + 1} / {sentences.length}</span>
       </div>
 
-      <div className="flex-1 container mx-auto p-4 max-w-lg flex flex-col justify-center">
-        
+      <div className="w-full max-w-lg flex-1 flex flex-col">
         {/* 메인 카드 */}
-        <div className="bg-white rounded-3xl shadow-xl p-8 mb-6 text-center border border-slate-100">
-          <h1 className="text-3xl font-bold text-slate-800 mb-3 leading-tight">
-            {currentSentence.englishText}
-          </h1>
-          <p className="text-lg text-slate-500 font-medium mb-8">
-            {currentSentence.koreanText}
-          </p>
+        <div className="relative glass rounded-[2rem] shadow-2xl p-8 mb-6 flex flex-col items-center text-center border border-white/60 bg-white/80">
+          
+          {/* 문장 표시 */}
+          <div className="mb-8">
+            <h1 className="text-3xl md:text-4xl font-black text-slate-800 mb-4 leading-tight tracking-tight">
+              {currentSentence.englishText}
+            </h1>
+            <p className="text-lg text-slate-500 font-medium bg-slate-100/50 inline-block px-4 py-2 rounded-xl">
+              {currentSentence.koreanText}
+            </p>
+          </div>
 
-          {/* 사용자 발화 표시 */}
-          {userText && (
-            <div className="mb-6 p-4 bg-slate-50 rounded-xl text-left border border-slate-100">
-              <p className="text-xs text-slate-400 font-bold uppercase mb-1">내가 말한 문장</p>
-              <p className="text-slate-700 text-lg">"{userText}"</p>
+          {/* 사용자 발화 (피드백 전) */}
+          {userText && !feedback && (
+            <div className="animate-fade-in mb-6 w-full">
+               <p className="text-xs text-slate-400 mb-1 uppercase font-bold tracking-wider">Detected</p>
+               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-slate-600">
+                 "{userText}"
+               </div>
             </div>
           )}
 
-          {/* AI 피드백 표시 */}
+          {/* 로딩 인디케이터 */}
+          {isProcessing && (
+             <div className="absolute inset-0 z-10 glass rounded-[2rem] flex flex-col items-center justify-center">
+                <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
+                <p className="text-indigo-600 font-bold animate-pulse">AI 코치가 분석 중입니다...</p>
+             </div>
+          )}
+
+          {/* 피드백 결과 */}
           {feedback && (
-            <div className="text-left bg-blue-50 p-5 rounded-2xl animate-fade-in border border-blue-100">
-              <div className="flex justify-between mb-4 bg-white p-3 rounded-xl shadow-sm">
-                <div className="text-center px-2">
-                  <div className="text-xs text-slate-400 mb-1">발음</div>
-                  <div className={`font-bold text-lg ${getScoreColor(feedback.pronunciation_score)}`}>
-                    {feedback.pronunciation_score}
-                  </div>
-                </div>
-                <div className="text-center px-2 border-l border-slate-100">
-                  <div className="text-xs text-slate-400 mb-1">문법</div>
-                  <div className={`font-bold text-lg ${getScoreColor(feedback.grammar_score)}`}>
-                    {feedback.grammar_score}
-                  </div>
-                </div>
-                <div className="text-center px-2 border-l border-slate-100">
-                  <div className="text-xs text-slate-400 mb-1">유창성</div>
-                  <div className={`font-bold text-lg ${getScoreColor(feedback.fluency_score)}`}>
-                    {feedback.fluency_score}
-                  </div>
-                </div>
+            <div className="w-full animate-slide-up">
+              <div className="grid grid-cols-3 gap-3 mb-6">
+                <ScoreBadge label="발음" score={feedback.pronunciation_score} />
+                <ScoreBadge label="문법" score={feedback.grammar_score} />
+                <ScoreBadge label="유창성" score={feedback.fluency_score} />
               </div>
               
-              <div className="text-slate-700 text-sm leading-relaxed font-medium">
-                {feedback.overall_feedback_korean}
+              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-5 rounded-2xl text-left border border-indigo-100/50 mb-4">
+                <div className="flex items-start gap-3">
+                   <div className="p-2 bg-white rounded-lg shadow-sm text-indigo-600">
+                     <RefreshCw size={16} />
+                   </div>
+                   <div>
+                     <p className="text-sm text-slate-700 leading-relaxed font-medium">
+                       {feedback.overall_feedback_korean}
+                     </p>
+                   </div>
+                </div>
               </div>
-              
+
               {feedback.suggested_sentence !== currentSentence.englishText && (
-                 <div className="mt-3 pt-3 border-t border-blue-200/50">
-                   <span className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded-md mr-2">Tip</span>
-                   <span className="text-sm text-blue-800">"{feedback.suggested_sentence}"</span>
+                 <div className="text-left bg-emerald-50/80 p-4 rounded-2xl border border-emerald-100">
+                   <p className="text-xs text-emerald-600 font-bold mb-1">이렇게 말해보는 건 어때요?</p>
+                   <p className="text-emerald-800 font-medium">"{feedback.suggested_sentence}"</p>
                  </div>
               )}
             </div>
           )}
-
-          {isProcessing && (
-            <div className="mt-6 flex justify-center items-center space-x-2 text-blue-600 font-bold animate-pulse">
-              <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
-              <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce delay-75"></div>
-              <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce delay-150"></div>
-              <span>AI 분석 중</span>
-            </div>
-          )}
         </div>
 
-        {/* 컨트롤 버튼 */}
-        <div className="grid grid-cols-3 gap-4">
+        {/* 하단 컨트롤러 */}
+        <div className="grid grid-cols-3 gap-4 mb-6">
           <button 
             onClick={playTTS}
-            className="flex flex-col items-center justify-center h-20 bg-white rounded-2xl shadow-sm border border-slate-200 hover:bg-slate-50 active:scale-95 transition-all"
+            className="group flex flex-col items-center justify-center h-20 bg-white rounded-2xl shadow-sm border border-slate-200 hover:border-indigo-200 hover:bg-indigo-50 transition-all active:scale-95"
           >
-            <Play className="text-slate-600 mb-1" fill="currentColor" size={24} />
-            <span className="text-xs font-bold text-slate-500">듣기</span>
+            <div className="p-2 bg-slate-100 rounded-full group-hover:bg-indigo-200 text-slate-500 group-hover:text-indigo-700 transition-colors mb-1">
+              <Play size={20} fill="currentColor" />
+            </div>
+            <span className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-600">듣기</span>
           </button>
 
           <button 
             onClick={isRecording ? stopRecording : startRecording}
-            className={`flex flex-col items-center justify-center h-20 rounded-2xl shadow-lg text-white transition-all active:scale-95 transform ${
-              isRecording ? 'bg-red-500 ring-4 ring-red-200 scale-105' : 'bg-blue-600 hover:bg-blue-700'
+            className={`relative flex items-center justify-center h-20 rounded-2xl shadow-lg shadow-indigo-500/20 transition-all active:scale-95 ${
+              isRecording 
+                ? 'bg-rose-500 text-white' 
+                : 'bg-gradient-to-tr from-indigo-600 to-violet-600 text-white hover:shadow-indigo-500/40'
             }`}
           >
-            {isRecording ? <Square size={28} fill="currentColor" /> : <Mic size={28} />}
+            {isRecording ? (
+               <>
+                 <span className="absolute w-full h-full bg-rose-500 rounded-2xl animate-ping opacity-30"></span>
+                 <Square size={28} fill="currentColor" />
+               </>
+            ) : (
+               <Mic size={32} />
+            )}
           </button>
 
           <button 
             onClick={nextSentence}
-            disabled={!feedback && currentIndex < sentences.length - 1} // 피드백 없으면 다음 불가 (선택사항)
-            className={`flex flex-col items-center justify-center h-20 rounded-2xl transition-all active:scale-95 border ${
-              feedback 
-                ? 'bg-green-500 border-green-500 text-white shadow-md hover:bg-green-600' 
-                : 'bg-slate-100 border-slate-200 text-slate-300'
+            disabled={!feedback && currentIndex < sentences.length - 1}
+            className={`group flex flex-col items-center justify-center h-20 rounded-2xl border transition-all active:scale-95 ${
+               feedback 
+                 ? 'bg-white border-emerald-200 hover:bg-emerald-50' 
+                 : 'bg-slate-50 border-slate-100 opacity-50 cursor-not-allowed'
             }`}
           >
-            <SkipForward size={24} />
-            <span className="text-xs font-bold mt-1">다음</span>
+             <div className={`p-2 rounded-full mb-1 ${feedback ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'}`}>
+               <SkipForward size={20} />
+             </div>
+            <span className={`text-[10px] font-bold ${feedback ? 'text-emerald-600' : 'text-slate-400'}`}>다음</span>
           </button>
         </div>
       </div>
